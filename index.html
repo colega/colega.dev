@@ -1,0 +1,72 @@
+<html>
+
+<head>
+    <title>colega.dev</title>
+    <meta http-equiv="refresh" content="0; URL=https://github.com/colega">
+    <style type="text/css">
+        body {
+            background-color: #ffffff;
+            margin: 20px;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        #progress {
+            position: absolute;
+            bottom: 0px;
+            left: 0px;
+            height: 10px;
+            background-color: black;
+            width: 100vw;
+            animation-name: progress;
+            animation-duration: 2s;
+            animation-timing-function: ease-out;
+        }
+        @keyframes progress {
+            from { width: 0vw; }
+            to { width: 100vw; }
+        }
+        #fallback {
+            opacity: 0;
+            animation-name: fallback;
+            animation-duration: 0.5s;
+            animation-delay: 3s;
+            animation-fill-mode: forwards;
+            animation-iteration-count: 1;
+
+            font-family: sans-serif;
+            color: black;
+            font-size: 24px;
+            font-weight: 100;
+            text-align: center;
+        }
+        #fallback strong {
+            font-weight: 400;
+        }
+        #fallback small {
+            font-size: 16px;
+        }
+        @keyframes fallback {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        a {
+            color: black;
+            text-decoration: none;
+        }
+    </style>
+</head>
+
+<body>
+<div id="progress"></div>
+<div id="fallback">
+    <a href="https://github.com/colega">
+        <strong>Oleg Zaytsev</strong>
+        <br>
+        <small>@colega</small>
+    </a>
+</div>
+</body>
+
+</html>
