@@ -1,0 +1,745 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Map That Forgets</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="vendor/reveal/reset.css">
+<link rel="stylesheet" href="vendor/reveal/reveal.css">
+<link rel="stylesheet" href="theme.css">
+</head>
+<body>
+<div class="brandmark" id="brandmark"><i></i>FOSDEM 2027 · Go devroom · The Map That Forgets</div>
+<div class="reveal">
+<div class="slides">
+
+<!-- ============================================================ 1. title -->
+<section class="v-center" data-hide-brand>
+  <canvas class="mapbg" data-intensity="1"></canvas>
+  <div class="over">
+    <div class="kicker enter">FOSDEM 2027 · Go devroom</div>
+    <h1 class="enter d1" style="font-size:132px">The Map<br><span class="grad">That Forgets</span></h1>
+    <p class="enter d2" style="font-size:38px; max-width:1150px; color:#ddd">A custom hash map in Go that tracks a billion series and forgets each one after 20 idle minutes</p>
+    <div class="enter d3" style="margin-top:50px; display:flex; gap:22px; align-items:center">
+      <span style="font-size:32px; font-weight:700; color:#fff">Oleg Zaytsev</span>
+      <span class="pill o">Grafana Labs · Mimir</span>
+      <span class="pill">github.com/colega</span>
+    </div>
+  </div>
+  <aside class="notes">
+    [0:00] Hi. I'm Oleg, I work on Grafana Mimir. This talk is about one data structure: a hash map that we built for one very specific job. It holds a lot of series hashes, and it forgets them. Most of the talk is about the forgetting part, because that turned out to be the hard part.
+    The background is the map: orange slots get written, the yellow sweep is the cleanup, red flashes are slots being forgotten.
+  </aside>
+</section>
+
+<!-- ============================================================ 2. context -->
+<section>
+  <div class="kicker">The problem</div>
+  <h2>Series limits, <span class="grad">before</span> Kafka</h2>
+  <div data-anim="arch" data-steps="2" style="margin-top:10px"></div>
+  <aside class="notes">
+    [0:40] Mimir is a horizontally scalable Prometheus backend. The new ingest architecture puts Kafka between the distributors and the ingesters.
+    (step) Problem: every tenant has a max series limit. With Kafka in the middle, we only find out that a series is over the limit after we wrote it to Kafka. We paid for it, block-builders have to enforce the limit again on their own, and the client never gets the error.
+    (step) So we built the usage-tracker. The distributor sends the series hashes, the usage-tracker answers with the rejected ones, and the client gets a 429. Before Kafka.
+  </aside>
+</section>
+
+<!-- ============================================================ 3. the job -->
+<section>
+  <div class="kicker">The job</div>
+  <h2>The whole service is one map</h2>
+  <div class="row" style="margin-top:20px">
+    <div class="col">
+      <pre class="enter sm"><code class="language-go" data-trim>
+// conceptually
+var series map[uint64]time.Time
+
+func track(hash uint64, now time.Time) (rejected bool) {
+	if _, ok := series[hash]; !ok && len(series) >= limit {
+		return true
+	}
+	series[hash] = now
+	return false
+}
+
+// every minute
+for h, t := range series {
+	if now.Sub(t) > 20*time.Minute {
+		delete(series, h)
+	}
+}
+      </code></pre>
+    </div>
+    <div class="col" style="flex:0.85">
+      <ul class="clean">
+        <li class="fragment rise">Keys are <b>series hashes</b>: already random <code>uint64</code></li>
+        <li class="fragment rise">Value is <b>"last seen"</b>, minute precision is enough</li>
+        <li class="fragment rise">Every push request <b>updates</b> thousands of keys</li>
+        <li class="fragment rise">Every minute, <b>forget</b> what was idle for 20 minutes</li>
+        <li class="fragment rise">Hash collisions? <span class="muted">We accept them. It is a protection, not billing.</span></li>
+      </ul>
+    </div>
+  </div>
+  <aside class="notes">
+    [1:40] If you squint, the service is this map. A key is the hash of the series labels. The value is when we saw it last. Track checks the limit and updates. Once a minute we delete what was idle for 20 minutes.
+    The rest of the service is replication through Kafka, snapshots, partitions, rings. Today I only talk about this map.
+  </aside>
+</section>
+
+<!-- ============================================================ 4. scale -->
+<section>
+  <div class="kicker">The scale</div>
+  <h2>How big is "a lot"?</h2>
+  <div class="row" style="margin-top:50px; gap:30px">
+    <div class="card glow col enter">
+      <div class="bignum md grad" data-count="64">64</div>
+      <div class="bignum-label">partitions</div>
+      <p class="small muted" style="margin-top:16px">each one owned by a replica in every zone</p>
+    </div>
+    <div class="card glow col enter d1">
+      <div class="bignum md grad" data-count="16">16</div>
+      <div class="bignum-label">shards per tenant</div>
+      <p class="small muted" style="margin-top:16px">one mutex and one map each</p>
+    </div>
+    <div class="card glow col enter d2">
+      <div class="bignum md grad" data-count="1000000000" style="font-size:50px; line-height:84px; letter-spacing:-0.02em">1,000,000,000</div>
+      <div class="bignum-label">series per partition</div>
+      <p class="small muted" style="margin-top:16px">the scale we size for: 62.5M per shard</p>
+    </div>
+  </div>
+  <div class="row enter d3" style="margin-top:40px; gap:30px">
+    <div class="card col"><span class="o mono">1 min</span> cleanup interval</div>
+    <div class="card col"><span class="o mono">20 min</span> idle timeout</div>
+    <div class="card col"><span class="o mono">10 min</span> snapshot interval</div>
+  </div>
+  <aside class="notes">
+    [2:40] 64 partitions, each tenant is split in 16 shards inside a partition. A shard is a mutex plus one of these maps. The scale we size and benchmark for is a billion series per partition, so 62 and a half million entries in one map.
+    Every minute we clean up. Every 10 minutes we write a snapshot. Remember those three numbers: they come back as performance problems later.
+  </aside>
+</section>
+
+<!-- ============================================================ section 1 -->
+<section class="section-slide" data-hide-brand>
+  <canvas class="mapbg" data-intensity="0.45"></canvas>
+  <div class="over">
+    <div class="section-num enter">01</div>
+    <h2 class="enter d1">One byte of time</h2>
+    <p class="enter d2">Why store 8 bytes of timestamp if you only care about the last hour?</p>
+  </div>
+  <aside class="notes">[3:30] First design decision: the value.</aside>
+</section>
+
+<!-- ============================================================ 5. clock -->
+<section>
+  <div class="kicker">clock.Minutes</div>
+  <div class="row center" style="gap:60px">
+    <div data-anim="clock" data-steps="4" style="flex:0 0 600px"></div>
+    <div class="col stack">
+      <h2 style="font-size:54px">A 2-hour clock face</h2>
+      <pre class="sm tight"><code class="language-go" data-trim>
+// Minutes passed since the last 2-hour boundary.
+// Only makes sense within the last hour.
+type Minutes uint8
+
+func ToMinutes(t time.Time) Minutes {
+	return Minutes(t.Sub(t.Truncate(2 * time.Hour)).Minutes())
+}
+      </code></pre>
+      <div class="clk-cap fadein" data-clk="0">13:35 is <b class="y">95</b>: one byte, and 7 bits are enough</div>
+      <div class="clk-cap fadein" data-clk="1"><span class="o">Valid window</span>: the last 60 minutes</div>
+      <div class="clk-cap fadein" data-clk="2"><span class="r">Watermark</span> = now - 20 min. Older series expire</div>
+      <div class="clk-cap fadein" data-clk="4">14:10 is <b class="y">10</b>. And <b>10 is after 115</b>.</div>
+    </div>
+  </div>
+  <style>.clk-cap { font-size: 28px; } .clk-cap.on { opacity: 1; }</style>
+  <aside class="notes">
+    [3:45] We don't need nanoseconds, cleanup runs once a minute. We don't need years either: the idle timeout is at most one hour. So the value is the number of minutes since the last even hour. 13:35 is 95. That is one byte.
+    (step) Only the last hour is valid.
+    (step) The watermark is now minus 20 minutes. Everything at or behind it expires.
+    (step) Cleanup removes them.
+    (step) The catch: it is a clock. At 14:10 the value is 10, and 10 must compare as newer than 115. So GreaterThan is not a plain comparison. Remember that, it comes back as a branch-prediction problem.
+  </aside>
+</section>
+
+<!-- ============================================================ 6. zero is empty -->
+<section>
+  <div class="kicker">The first trick</div>
+  <h2>Zero must mean <span class="grad">empty</span></h2>
+  <div class="row" style="margin-top:30px">
+    <div class="col stack">
+      <pre class="tight sm"><code class="language-go" data-trim>
+// xorData is what we store in data.
+// By storing xor-ed values, our empty data
+// represents an empty dataset.
+type xorData uint8
+
+func xor(v clock.Minutes) xorData { return xorData(^v) }
+
+const (
+	empty     = 0b0000_0000
+	spillmark = 0b0000_0001 // later!
+)
+      </code></pre>
+    </div>
+    <div class="col stack">
+      <div class="card fragment rise small"><b>Minute 0 is a valid value.</b> If we store it as-is, we can't tell it from "no value here".</div>
+      <div class="card fragment rise small">Store <code>^minutes</code>: minute 0 becomes <code>0xff</code>, and <b>0x00 is free</b> to mean empty.</div>
+      <div class="card fragment rise glow small"><code>make([]data, n)</code> is <b>already an empty map</b>. No fill loop, the kernel gives zeroed pages for free.</div>
+      <div class="card fragment rise small">Cost: <code>0xff</code> and <code>0xfe</code> can't be stored. <span class="muted">Fine, we only need 0..119.</span></div>
+    </div>
+  </div>
+  <aside class="notes">
+    [5:00] Small trick, but everything later depends on it. We invert the minutes before we store them. So zero bytes mean empty slot, and one means a spillmark, which you'll meet later.
+    Other Swiss tables use a non-zero byte for empty, and they have to fill the control bytes on every allocation. We don't: make() is the empty map.
+  </aside>
+</section>
+
+<!-- ============================================================ section 2 -->
+<section class="section-slide" data-hide-brand>
+  <canvas class="mapbg" data-intensity="0.45"></canvas>
+  <div class="over">
+    <div class="section-num enter">02</div>
+    <h2 class="enter d1">A Swiss table, but ours</h2>
+    <p class="enter d2">Based on dolthub/swiss, then mostly rewritten for one job</p>
+  </div>
+  <aside class="notes">[5:45] Now the container.</aside>
+</section>
+
+<!-- ============================================================ 7. group layout -->
+<section>
+  <div class="kicker">Layout</div>
+  <h2 style="margin-bottom:30px">Groups of 8 slots, three arrays</h2>
+  <div data-anim="group" data-steps="3"></div>
+  <div style="margin: 34px 0 0 150px" class="stack">
+    <div class="fadein grp-cap" data-grp="0"><span class="o mono">index</span> 1 byte per slot: 7 bits of the hash + 2. Find candidates without touching keys.</div>
+    <div class="fadein grp-cap" data-grp="1"><span class="y mono">data</span> 1 byte per slot: the xor-ed minutes.</div>
+    <div class="fadein grp-cap" data-grp="2"><span class="b mono">keys</span> 8 bytes per slot: the full hash, only read to confirm a match.</div>
+    <div class="fadein grp-cap" data-grp="3"><b>80 bytes per group, 64 are keys.</b> Load target is 50%, so 20 bytes per series.</div>
+  </div>
+  <style>.grp-cap { font-size: 27px; } .grp-cap.on { opacity: 1; }</style>
+  <aside class="notes">
+    [6:00] Like a Swiss table: slots in groups of 8. For each group we have an index word, a data word and the keys.
+    (step) index is one byte per slot, a prefix of the hash. Plus 2, so 0 and 1 stay reserved.
+    (step) data is one byte per slot.
+    (step) keys are 8 bytes per slot. Look at the proportions: the keys are huge. One group of keys is exactly one cache line.
+    (step) So four fifths of the memory is keys. Cleanup only needs data. That shapes everything later: avoid touching keys.
+  </aside>
+</section>
+
+<!-- ============================================================ 8. SWAR match -->
+<section>
+  <div class="kicker">SWAR: SIMD within a register</div>
+  <h2 style="margin-bottom:24px">8 slots, one <code style="font-size:0.9em">uint64</code>, no loop</h2>
+  <div class="row" style="gap:50px">
+    <div data-anim="match" data-steps="3" style="flex: 0 0 990px"></div>
+    <div class="col stack" style="margin-top:40px">
+      <div class="fadein m-cap" data-m="0">Looking for prefix <b class="y">0x47</b></div>
+      <div class="fadein m-cap" data-m="1">Broadcast it to all 8 bytes</div>
+      <div class="fadein m-cap" data-m="2">XOR: matching bytes become <b class="g">00</b></div>
+      <div class="fadein m-cap" data-m="3">Find zero bytes: slots <b class="g">1</b> and <b class="g">3</b>. Now compare 2 keys, not 8.</div>
+    </div>
+  </div>
+  <pre class="sm tight fragment rise" data-fragment-index="3" style="margin-top:28px"><code class="language-go" data-trim>
+func (m *index) match(p prefix) bitset { return findZeroBytes(castUint64(m) ^ (loBits * uint64(p))) }
+func findZeroBytes(x uint64) bitset    { return bitset(((x - loBits) &^ x) & hiBits) }   // loBits = 0x0101..01, hiBits = 0x8080..80
+  </code></pre>
+  <style>.m-cap { font-size: 28px; } .m-cap.on { opacity: 1; }</style>
+  <aside class="notes">
+    [7:15] The classic Swiss table trick, without SIMD instructions. Read the 8 index bytes as one uint64. Multiply the prefix by 0x0101..01 to put it in every byte. XOR: matching bytes become zero. Then the old bit hack from Stanford's bithacks page finds the zero bytes in one subtract and two ANDs. The result has the high bit of every matching byte set, and TrailingZeros gives us the slot.
+    It can report a false positive, that's fine: we compare the full key anyway.
+    Keep this idea in mind. We use it again for the cleanup, on data, with arithmetic.
+  </aside>
+</section>
+
+<!-- ============================================================ 9. hackathon -->
+<section>
+  <div class="kicker">December 2024 · hackathon</div>
+  <h2 style="margin-bottom:26px">The first version: key and value in <span class="grad">one uint64</span></h2>
+  <div data-anim="bits" data-steps="3"></div>
+
+  <div class="stack" style="margin-top:30px">
+    <div class="fadein b-cap" data-bits="0">The key is already a hash: <b>no hashing</b> in the map.</div>
+    <div class="fadein b-cap" data-bits="1"><span class="o">Top 7 bits</span> go to the index.</div>
+    <div class="fadein b-cap" data-bits="2">128 shards: <span class="r">the low 7 bits are the shard</span>, the same in every key of the map. Useless!</div>
+    <div class="fadein b-cap" data-bits="3"><span class="y">Put the value there.</span> One <code>uint64</code> per series, and Cleanup reads one array.</div>
+  </div>
+  <pre class="sm tight fadein bits-code" data-bits="3" style="margin-top:26px; width:1100px"><code class="language-go" data-trim>
+const valueBits = 7 // Shards = 1 &lt;&lt; valueBits = 128
+
+m.data[i][s] = masked | uint64(value&amp;valueMask^valueMask) // key AND value
+  </code></pre>
+  <style>.bits-code.on { opacity: 1; }</style>
+  <style>.b-cap { font-size: 28px; } .b-cap.on { opacity: 1; }</style>
+  <aside class="notes">
+    [8:30] This started in a hackathon in December 2024, on a branch. Keys are already hashes, so we don't hash again.
+    (step) Top bits go to the index.
+    (step) Then I noticed: with 128 shards, a shard holds the keys with the same value modulo 128. So all keys in one map have the same low 7 bits. 7 bits that carry no information.
+    (step) And our value is 7 bits! So the value went into the key. One uint64 per series. I was very proud of this one.
+  </aside>
+</section>
+
+<!-- ============================================================ 10. goroutines -->
+<section>
+  <div class="kicker">December 2024 · hackathon</div>
+  <h2>One goroutine per shard?</h2>
+  <div class="row" style="margin-top:20px; gap:40px">
+    <div class="col stack">
+      <div class="quote enter">Say we have 10k tenants in an env, that's 10K goroutines, not that bad... I hope. We'll see.<span class="who">me, PR #10164, Dec 7 2024</span></div>
+      <div class="quote fragment rise" style="border-color: var(--green)">The new map implementation is great, but channel interaction seems to be too expensive. This replaces goroutines &amp; channels with a simple sync.Mutex.<span class="who">me, PR #10193, Dec 9 2024</span></div>
+    </div>
+    <div class="col fragment rise">
+      <h3 style="font-size:30px">vs. Go maps of <code>*atomic.Int32</code></h3>
+      <div class="bars" data-log="1" data-bars='[{"n":"1000 tenants, map","v":12480,"l":"12.48 ms","c":"gray"},{"n":"1000 tenants, swiss","v":38.5,"l":"38 µs  (-99.7%)"},{"n":"100M series, map","v":11997,"l":"12.00 ms","c":"gray"},{"n":"100M series, swiss","v":1382,"l":"1.38 ms  (-88%)"}]'></div>
+      <p class="small muted" style="margin-top:18px">TrackSeries with cleanup running, M3 Pro. Geomean over 30 cases: -58%.</p>
+    </div>
+  </div>
+  <aside class="notes">
+    [9:30] The first version ran one goroutine per shard and talked to it over channels. My PR description literally says "not that bad... I hope. We'll see." We saw. Two days later I replaced it with a mutex.
+    The map itself was a big win over the first prototype, which was Go maps of pointers to atomic ints: with cleanup running and many tenants, tracking went from 12 ms to under 40 microseconds.
+  </aside>
+</section>
+
+<!-- ============================================================ 11. reality -->
+<section>
+  <div class="kicker">July 2025 · productionizing</div>
+  <h2>Reality: 128 shards per tenant is too many</h2>
+  <div class="row" style="margin-top:30px; gap:40px">
+    <div class="col stack">
+      <div class="card enter">Most tenants are small. 128 maps each is a lot of <b>fixed cost</b>.</div>
+      <div class="card enter d1">The shard count becomes <b>configurable</b>. The low bits of a key are not a fixed free field anymore.</div>
+      <div class="card enter d2 glow">So keys get their own array. <span class="muted">"This is up to 14% slower than fixed shards."</span> Accepted.</div>
+    </div>
+    <div class="col fragment rise">
+      <h3 style="font-size:30px">Today, vs. a Go 1.27 <code>map[uint64]uint8</code></h3>
+      <p class="small muted">10M series, M3 Pro. Go maps are Swiss tables since Go 1.24.</p>
+      <table class="t">
+        <tr><th></th><th>Go map</th><th>tenantshard</th></tr>
+        <tr><td>Memory per series</td><td>30.3 B</td><td class="win">20.0 B</td></tr>
+        <tr><td>Put (cache miss)</td><td>~50 ns</td><td>~52 ns</td></tr>
+        <tr class="hl"><td>Cleanup, 1/60 expired</td><td>61.9 ms</td><td class="win">5.4 ms</td></tr>
+      </table>
+      <p class="small" style="margin-top:20px">Put is not where you win. <b class="o">Forgetting</b> is.</p>
+    </div>
+  </div>
+  <aside class="notes">
+    [10:30] When we productionized it in summer 2025, 128 shards per tenant was too much fixed overhead for small tenants. We went to 16, and made the shard count a parameter of the map. Once the count is not a fixed 128, the low 7 bits are not free anymore, so the keys got their own array. I measured it, it was up to 14% slower, and we accepted that.
+    How does it compare to a plain Go map today? Go maps are Swiss tables since 1.24, so Put is the same: it's one cache miss either way. Memory is a bit better. But cleanup is 11 times faster, because we only scan the data bytes. That's where the rest of this talk goes.
+    It went to main in August 2025, PR 12358, 19 thousand lines.
+  </aside>
+</section>
+
+<!-- ============================================================ section 3 -->
+<section class="section-slide" data-hide-brand>
+  <canvas class="mapbg" data-intensity="0.45"></canvas>
+  <div class="over">
+    <div class="section-num enter">03</div>
+    <h2 class="enter d1">Forgetting is hard</h2>
+    <p class="enter d2">Open addressing doesn't like deletes</p>
+  </div>
+  <aside class="notes">[11:45] So, deletes.</aside>
+</section>
+
+<!-- ============================================================ 12. probe chain -->
+<section>
+  <div class="kicker">Linear probing</div>
+  <h2 style="margin-bottom:34px">Why you can't just clear a slot</h2>
+  <div data-anim="probe" data-steps="4"></div>
+  <pre class="sm tight fragment rise" data-fragment-index="4" style="margin-top:30px; width: 1100px"><code class="language-go" data-trim>
+// The rule that makes a lookup stop:
+// "this group has a free slot, so insert would have used it"
+if m.index[i].matchEmpty() != 0 { break } // not found
+  </code></pre>
+  <aside class="notes">
+    [12:00] Open addressing with linear probing. X belongs in group 0, but group 0 was full when X arrived, so it went into group 1.
+    (step) A lookup for X walks: group 0, no X, no empty slot, so X might be further. Group 1: found.
+    (step) Now cleanup removes C. If we just clear the slot...
+    (step) ...the next lookup for X stops at group 0, because there's an empty slot. X is gone. Worse, X is still there, so the next put counts it as a new series, against the limit.
+    (step) The textbook fix is a tombstone: deleted, but keep walking.
+  </aside>
+</section>
+
+<!-- ============================================================ 13. generations -->
+<section>
+  <div class="kicker">Three generations of delete</div>
+  <h2 class="gens-title" style="font-size:48px; margin-bottom:28px">Before cleanup</h2>
+  <div data-anim="gens" data-steps="3"></div>
+  <div class="legend" style="margin: 34px 0 0 150px">
+    <span><i class="sw w"></i>written by cleanup</span>
+    <span><i class="sw c"></i>not touched</span>
+    <span><i class="sw t"></i>tombstone</span>
+    <span><i class="sw s"></i>spillmark</span>
+  </div>
+  <div style="position:relative; margin: 30px 0 0 150px; height: 150px">
+    <pre class="sm tight fadein" data-gens="1" style="position:absolute; inset:0 auto auto 0; width:1000px"><code class="language-go" data-trim>
+// v1: a removal writes all three arrays
+m.index[i][j] = tombstone
+m.keys[i][j] = 0
+m.data[i][j] = 0
+m.dead++
+    </code></pre>
+    <pre class="sm tight fadein" data-gens="3" style="position:absolute; inset:0 auto auto 0; width:1000px"><code class="language-go" data-trim>
+// v2 lookup: stop probing if the last slot is empty (not busy and not a spillmark)
+if m.index[i][last] == empty {
+	break
+}
+    </code></pre>
+  </div>
+  <style>.fadein[data-gens].on { opacity: 1; }</style>
+  <aside class="notes">
+    [13:30] Here is one group, with all three arrays. Everything but A expires.
+    (step) Version 1 is the textbook: tombstone in the index, zero the key, zero the data. 21 writes, and the keys line is dirty now, which is the 64-byte line. The tombstone slot can't be reused until the next rehash, and when half of the map is dead we rehash the whole shard, under the lock.
+    (step) In April I noticed that groups are half full on average, so usually there is a free slot. If the group has a free slot, nobody was pushed past it. Then we can move the last element into the hole and no tombstone is needed. Much fewer rehashes. But we still write keys.
+    (step) Then the real insight: a lookup doesn't need to know which slot was deleted. It only needs one bit per group: was this group ever full? A group is full exactly when its last slot is taken. So we put a mark only in slot 7. The spillmark. Probing continues while the last slot is not empty. Keys are never written by cleanup: stale keys are unreachable because the index byte gates the key comparison. Two words written, six slots free, and even the spillmark slot is reusable by insert.
+  </aside>
+</section>
+
+<!-- ============================================================ 14. quirks of spillmarks -->
+<section>
+  <div class="kicker">Spillmark quirks</div>
+  <h2>Things the tests found</h2>
+  <div class="row" style="margin-top:20px; gap:40px">
+    <div class="col stack">
+      <div class="card glow enter">
+        <h3 style="font-size:30px"><span class="r">The infinite lookup</span></h3>
+        <p class="small">Only a rehash sets a last slot back to empty. If every group's last slot is taken, a lookup for a missing key <b>walks forever</b>.</p>
+        <pre class="xs tight"><code class="language-go" data-trim>
+if i == ps {
+	// We're back where we started: every group has its
+	// last slot taken, so |key| is not in the map.
+	break
+}
+        </code></pre>
+      </div>
+    </div>
+    <div class="col stack">
+      <div class="card enter d1">
+        <h3 style="font-size:30px"><span class="y">The rehash loop</span></h3>
+        <p class="small">Too many spilled groups → re-pack at the <b>same size</b>. But a fresh re-pack can fill half of the groups. So the threshold is half <b class="o">+ 1</b>.</p>
+        <pre class="xs tight"><code class="language-go" data-trim>
+func (m *Map) maxSpilledGroups() uint32 {
+	return uint32(len(m.index))*maxAvgGroupLoad/groupSize + 1
+}
+        </code></pre>
+      </div>
+      <div class="card enter d2">
+        <p class="small" style="margin:0"><b>Rolled out side by side</b>: v1 and v2 behind <code>-usage-tracker.tenantshard-impl-version</code>. Three weeks later: <span class="g">-974 lines</span>, v1 gone.</p>
+      </div>
+    </div>
+  </div>
+  <aside class="notes">
+    [15:30] Two quirks. First: a lookup walks until it finds a group whose last slot is empty. Only a rehash makes a last slot empty again. So if all groups have their last slot taken, looking for a missing key never ends. The counter should prevent that state, and it did once it counted right, but a loop shouldn't depend on a counter maintained somewhere else to terminate. So: if we're back at the start, stop.
+    Second: when too many groups spilled, we re-pack at the same size. A fresh re-pack can leave half of the groups full, so the threshold has to be half plus one, or every re-pack triggers the next one.
+    And you don't swap the storage engine of a running fleet and hope. v1 and v2 lived side by side behind a flag, we switched cells one by one, and three weeks later v1 was deleted.
+  </aside>
+</section>
+
+<!-- ============================================================ section 4 -->
+<section class="section-slide" data-hide-brand>
+  <canvas class="mapbg" data-intensity="0.45"></canvas>
+  <div class="over">
+    <div class="section-num enter">04</div>
+    <h2 class="enter d1">Cleanup at 64 slots per branch</h2>
+    <p class="enter d2">The scan holds the shard lock. Every request of that tenant waits for it.</p>
+  </div>
+  <aside class="notes">[16:30] Deletes are cheap now. But the scan still visits every slot, every minute, under the lock.</aside>
+</section>
+
+<!-- ============================================================ 15. branches -->
+<section>
+  <div class="kicker">Branch prediction</div>
+  <h2>The 2-hour boundary is a coin flip</h2>
+  <div class="row" style="margin-top:20px; gap:40px">
+    <div class="col" style="display:flex; flex-direction:column; gap:10px">
+      <div class="codelabel">before</div>
+      <pre class="xs tight"><code class="language-go" data-trim>
+func (m Minutes) GreaterThan(other Minutes) bool {
+	if m > other {
+		return m-other &lt; 60
+	}
+	return int(m+(2*60))-int(other) &lt; 60
+}
+
+func (m Minutes) GreaterOrEqualThan(other Minutes) bool {
+	return m == other || m.GreaterThan(other)
+}
+      </code></pre>
+      <div class="codelabel fragment rise" data-fragment-index="1">after (#16778)</div>
+      <pre class="xs tight fragment rise" data-fragment-index="1"><code class="language-go" data-trim>
+func (m Minutes) aheadOf(other Minutes) int64 {
+	d := int64(m) - int64(other)
+	// d>>63 is -1 if d is negative, 0 otherwise:
+	// this adds 120 only when d is negative.
+	return d + (d>>63)&amp;120
+}
+
+func (m Minutes) GreaterOrEqualThan(other Minutes) bool {
+	return uint64(m.aheadOf(other)) &lt; 60
+}
+      </code></pre>
+    </div>
+    <div class="col stack">
+      <div class="card">Series live on <b>both sides</b> of 0: some at 115, some at 5.<br><span class="muted small">So <code>m > other</code> is random per series, and the CPU mispredicts.</span></div>
+      <div class="fragment rise" data-fragment-index="1">
+        <div class="bars" data-bars='[{"n":"same period","v":6.30,"l":"6.30 ms","c":"gray"},{"n":"same, branchless","v":5.99,"l":"5.99 ms"},{"n":"across boundary","v":8.63,"l":"8.63 ms","c":"gray"},{"n":"across, branchless","v":6.78,"l":"6.78 ms  (-21%)"}]'></div>
+        <p class="small muted" style="margin-top:14px">Cleanup of 1M series, M3 Pro</p>
+      </div>
+    </div>
+  </div>
+  <aside class="notes">
+    [16:45] Remember the clock face. Comparing on a clock needs a branch: is m bigger than other? Near the 2-hour boundary, half of the series are at 115 and half at 5, so that branch is a coin flip, and the CPU mispredicts all the time.
+    (step) Compute the distance with a sign mask instead: shift right by 63 gives all ones if negative, AND with 120 adds 120 only then. One unsigned range check. 21% faster across the boundary, and the same otherwise.
+  </aside>
+</section>
+
+<!-- ============================================================ 16. SWAR cleanup -->
+<section>
+  <div class="kicker">SWAR cleanup · #16825</div>
+  <h2 style="margin-bottom:10px">Compare 8 clocks with one subtraction</h2>
+  <div class="row" style="gap:30px">
+    <div data-anim="cleanup" data-steps="3" style="flex:0 0 1400px"></div>
+  </div>
+  <div class="row" style="margin-top:10px; gap:40px">
+    <div class="fadein cl-cap col" data-cl="1">Same steps as <code>aheadOf</code>, in every byte at once. Borrows never cross a byte.</div>
+    <div class="fadein cl-cap col" data-cl="2"><b>One branch per 64 slots.</b> A block with nothing to remove is not written.</div>
+  </div>
+  <pre class="xs tight fadein cl-code" data-cl="2" style="margin-top:18px; width: 1420px"><code class="language-go" data-trim>
+for b := 0; b &lt; len(m.data); b += groupsPerBlock {   // "The loop below is intentionally unrolled and doesn't use helper functions,
+	x[0] = *groupWord(&amp;d[0]) // ... x[7]           //  as those helpers become too expensive to inline."
+	r[0] = expiredSlots(x[0], w) &amp;^ freeSlots(x[0]) // ... r[7]
+	if r[0]|r[1]|r[2]|r[3]|r[4]|r[5]|r[6]|r[7] == 0 { continue }
+	removed += clearSlots(&amp;idx[0], &amp;d[0], x[0], r[0]) + /* ... */ clearSlots(&amp;idx[7], &amp;d[7], x[7], r[7])
+}
+  </code></pre>
+  <style>.cl-cap { font-size: 26px; } .cl-cap.on, .cl-code.on { opacity: 1; }</style>
+  <aside class="notes">
+    [18:00] Now we can do the same thing as the index match, on the data. 8 groups of data are 64 bytes, one cache line. We call it a block.
+    (step) Zoom in on group 0. We put the watermark in every byte and do the aheadOf arithmetic on the whole uint64. The trick: set the high bit of each byte in one operand and clear it in the other, so a subtraction never borrows into the next byte, then fix the high bits with XOR. The result: a high bit in every expired byte.
+    (step) OR the masks of the 8 groups. If it's zero, skip the block, no writes. That is one branch per 64 slots, and in steady state most blocks have nothing to remove.
+    (step) Otherwise write the block: expired slots become empty, a last slot becomes a spillmark.
+  </aside>
+</section>
+
+<!-- ============================================================ 17. code of expiredSlots -->
+<section>
+  <div class="kicker">The scary part</div>
+  <h2 style="margin-bottom:20px">It is just <code style="font-size:0.85em">aheadOf(w, v) &lt; 60</code></h2>
+  <pre class="sm"><code class="language-go" data-trim data-line-numbers="|4-6|7-8|9-11|13-15">
+func expiredSlots(x, w uint64) uint64 {
+	v := ^x // The clock.Minutes of every slot, see xorData.
+
+	// d := watermark - v. Setting the high bit of each byte of w and clearing it in v means that no byte
+	// borrows from the next one. The xor then restores the high bits. Note that ^v is x.
+	d := ((w | hiBits) - (v &^ hiBits)) ^ ((w ^ x) & hiBits)
+	// d < 0, that is watermark < v: the borrow out of the high bit of each byte.
+	negative := ((^w & v) | (^(w ^ v) & d)) & hiBits
+	// aheadOf := d + (d>>63)&120. 120 fits in the low 7 bits, so adding it to the low 7 bits of each
+	// byte never carries into the next byte, and the xor adds the high bits back.
+	aheadOf := ((d &^ hiBits) + (negative>>7)*120) ^ (d & hiBits)
+
+	// aheadOf < 60: adding 128-60 to the low 7 bits sets the high bit when they are 60 or more,
+	// and a byte that already has its high bit set is 128 or more.
+	return ^(((aheadOf &^ hiBits) + loBits*(128-60)) | aheadOf) & hiBits
+}
+  </code></pre>
+  <p class="small muted" style="margin-top:18px">Tested exhaustively: every watermark × every value, against <code>clock.Minutes.GreaterOrEqualThan</code>.</p>
+  <aside class="notes">
+    [19:15] This is the whole thing. It looks scary, but it's the three lines of aheadOf, per byte.
+    (step) Subtract without borrows.
+    (step) Find which bytes went negative.
+    (step) Add 120 to those, without carries.
+    (step) Check less than 60, with the same high-bit trick.
+    And because the input space is tiny, 256 times 256, the test checks all of it. Not a property test, the full space.
+  </aside>
+</section>
+
+<!-- ============================================================ 18. AVX2 vs SWAR -->
+<section>
+  <div class="kicker">Three attempts</div>
+  <h2>SSE2 + NEON, AVX2, or plain Go?</h2>
+  <div class="row" style="margin-top:14px; gap:40px">
+    <div class="col">
+      <table class="t" style="font-size:22px">
+        <tr><th>c7i, GOAMD64=v3, 1M</th><th>main</th><th>AVX2</th><th>SWAR</th></tr>
+        <tr><td>Cleanup, 25% expired</td><td>8.59 ms</td><td class="win">0.70</td><td class="win">0.88</td></tr>
+        <tr><td>Cleanup, churn 2/3 per 2h</td><td>4.09 ms</td><td class="win">0.83</td><td class="win">0.96</td></tr>
+        <tr><td>Cleanup, nothing expires</td><td>4.01 ms</td><td class="win">0.44</td><td class="win">0.63</td></tr>
+        <tr class="hl"><td>Rehash, 1M</td><td>11.5 ms</td><td class="lose">16.7 (+45%)</td><td class="win">11.1</td></tr>
+      </table>
+      <div style="display:flex; gap:12px; margin-top:24px; flex-wrap:wrap">
+        <span class="pill">#16473 SSE2 + NEON: open</span>
+        <span class="pill r">#16802 AVX2 + avo: closed</span>
+        <span class="pill g">#16825 SWAR: merged</span>
+      </div>
+      <p class="small" style="margin-top:20px">Assembly can't be inlined, so every probe in Rehash paid a call. And it was amd64 only.</p>
+    </div>
+    <div class="col stack" style="flex:0.85">
+      <div class="quote fragment rise">I would maybe challenge that this is any better, maintainability-wise [...] personally I find the assembly easier to understand than this.<span class="who">reviewer, on #16825</span></div>
+      <div class="quote fragment rise" style="border-color: var(--green)">At least I can justify this one as I understand it (and actually manually wrote part of this code).<br>Oh, and it works on arm64 too!<span class="who">me</span></div>
+    </div>
+  </div>
+  <aside class="notes">
+    [20:00] I tried three times. First SSE2 and NEON, that PR is still open. Then AVX2 with avo, generated assembly: the fastest cleanup, but rehash got 45% slower, because an assembly function can't be inlined and every probe paid a call. Plus a big new dependency, and amd64 only.
+    (step) The SWAR version in plain Go gets 80 to 90% of the gain, rehash doesn't change, works everywhere. The reviewer said he finds the assembly easier to read. Fair!
+    (step) My answer: at least I understand this one. Honest trade-off: there is no free readability here, both need a pencil and paper.
+  </aside>
+</section>
+
+<!-- ============================================================ section 5 -->
+<section class="section-slide" data-hide-brand>
+  <canvas class="mapbg" data-intensity="0.45"></canvas>
+  <div class="over">
+    <div class="section-num enter">05</div>
+    <h2 class="enter d1">It's the lock, not the map</h2>
+    <p class="enter d2">p99 doesn't care how fast you scan. It cares how long you hold the mutex.</p>
+  </div>
+  <aside class="notes">[21:15] Last part. Everything so far made the map faster. But the latency of a request is about how long it waits for the lock.</aside>
+</section>
+
+<!-- ============================================================ 19. sync.Pool -->
+<section>
+  <div class="kicker">Snapshots · #16882</div>
+  <h2>The one-character fix</h2>
+  <div class="row" style="margin-top:20px; gap:40px">
+    <div class="col stack">
+      <pre class="sm tight"><code class="language-go" data-trim data-line-numbers="3">
+func pooledClone[T any](input []T, pool *sync.Pool) *[]T {
+	pooled := pool.Get().(*[]T)
+	if cap(*pooled) > len(input) { // was never true
+		*pooled = (*pooled)[:len(input)]
+	} else {
+		*pooled = make([]T, len(input))
+	}
+	copy(*pooled, input)
+	return pooled
+}
+      </code></pre>
+      <p class="small">A slice from <code>make</code> has <code>cap == len</code>. A shard of a stable size never hit the pool. <b>Every snapshot allocated and page-faulted 514 MB under the lock.</b></p>
+    </div>
+    <div class="col stack">
+      <div class="card glow fragment rise">
+        <div class="mono" style="font-size:40px"><span class="r">&gt;</span> → <span class="g">&gt;=</span></div>
+        <div class="bars" style="margin-top:20px" data-bars='[{"n":"lock hold, before","v":230,"l":"140 to 230 ms","c":"red"},{"n":"lock hold, after","v":15,"l":"15 ms","c":"green"}]'></div>
+        <p class="small muted" style="margin-top:12px">30M series per shard, M3 Pro</p>
+      </div>
+      <div class="card fragment rise small">Bonus quirk: under <code>-race</code>, <code>sync.Pool</code> drops 1 in 4 items on purpose. Don't test through a real pool.</div>
+    </div>
+  </div>
+  <aside class="notes">
+    [21:30] Snapshots clone the keys and data of a shard under the lock, then encode them without it. The clone buffers come from a sync.Pool. The check was cap greater than len. A slice from make has cap equal to len. So for a shard that doesn't change size, the pool never hit. Every 10 minutes we allocated half a gigabyte under the lock and took page faults on all of it.
+    (step) One character. 230 milliseconds to 15.
+    (step) And if you try to test it: the race detector makes sync.Pool drop items randomly. I learned that the fun way.
+  </aside>
+</section>
+
+<!-- ============================================================ 20. chunked iterate -->
+<section>
+  <div class="kicker">Snapshots · #16892</div>
+  <h2 style="margin-bottom:16px">15 ms is still 15 ms. Take the lock in chunks.</h2>
+  <div data-anim="locks" data-steps="1"></div>
+  <div class="row" style="gap:40px; margin-top:6px">
+    <div class="col card small">Copy 16K groups under the lock (1 MB of keys), unlock, then scan the copy.</div>
+    <div class="col card small glow">A rehash during iteration? It allocates new arrays and <b>never writes the old ones again</b>. Keep reading them, no lock needed.</div>
+  </div>
+  <aside class="notes">
+    [22:30] 15 ms is still a stall for every request of that tenant. So Iterate copies 16 thousand groups at a time under the lock, releases it, and scans the copy.
+    (step) 460 short holds instead of one long one. 24 microseconds on average, 110 at most.
+    The fun part is the rehash. My first version restarted iteration on rehash, with a fallback. Then the simpler idea: a rehash allocates new arrays and never touches the old ones. So once a rehash happens, keep reading the old arrays, without the lock. The closed PR says "superseded by a simpler approach".
+    Then we deployed it, and the p99 spikes were still there. They had moved: loading the other zone's snapshot held the lock for 100 to 200 ms per shard. Same fix: 16K puts per lock hold.
+  </aside>
+</section>
+
+<!-- ============================================================ 21. timeline -->
+<section>
+  <div class="kicker">Two years in one picture</div>
+  <h2 style="margin-bottom:0">Timeline</h2>
+  <div data-anim="timeline" data-steps="0" data-events='[
+    {"d":"2024-12-07","t":"Swiss map + channels","s":"#10164","lane":-3,"a":"start"},
+    {"d":"2024-12-09","t":"mutexes","s":"#10193","lane":-1,"a":"start"},
+    {"d":"2025-07-07","t":"16 shards, keys array","s":"usage-tracker branch","lane":1,"c":"#6e9fff"},
+    {"d":"2025-08-22","t":"in main","s":"#12358","lane":-2,"c":"#6e9fff"},
+    {"d":"2025-11-04","t":"Load: no lookup","s":"#13284","lane":2},
+    {"d":"2026-03-12","t":"limit-aware growth","s":"#14642","lane":-1},
+    {"d":"2026-04-10","t":"move, not tombstone","s":"#14932","lane":1,"c":"#b877d9"},
+    {"d":"2026-06-29","t":"throttle cleanup","s":"#15871","lane":-3},
+    {"d":"2026-09-14","t":"spillmarks","s":"#16532","lane":2,"c":"#4fd1c5","a":"end"},
+    {"d":"2026-10-05","t":"branchless clock","s":"#16778","lane":-2,"a":"end"},
+    {"d":"2026-10-13","t":"SWAR cleanup","s":"#16825","lane":1,"c":"#73bf69","a":"end"},
+    {"d":"2026-10-16","t":"chunked snapshots","s":"#16882 #16892","lane":-1,"c":"#73bf69","a":"end"}
+  ]'></div>
+  <aside class="notes">
+    [23:30] The whole story in one picture. A hackathon in December 2024. Production in summer 2025. And most of the deep work happened in the last few months, once real tenants grew big enough to show us where it hurts.
+    Fun detail: "throttle cleanup" was a closed PR in December 2024, and the same idea got merged in June 2026.
+  </aside>
+</section>
+
+<!-- ============================================================ 22. lessons -->
+<section>
+  <div class="kicker">Takeaways</div>
+  <h2>What I'd tell myself in 2024</h2>
+  <div class="row" style="margin-top:20px; gap:30px">
+    <div class="col stack">
+      <div class="card glow fragment rise"><b>Know your data.</b> Keys are hashes, values fit in a byte, time is a clock.</div>
+      <div class="card fragment rise"><b>Zero means empty.</b> <code>make</code> gives you the empty map for free.</div>
+      <div class="card fragment rise"><b>Benchmark the boring paths.</b> Put was fine from day one. Delete, cleanup and snapshots were not.</div>
+    </div>
+    <div class="col stack">
+      <div class="card fragment rise"><b>Random data breaks branches.</b> SWAR is SIMD in plain Go, on every arch.</div>
+      <div class="card fragment rise"><b>A lock hold is a latency budget.</b> Chunk it.</div>
+      <div class="card glow fragment rise"><b>Ship side by side.</b> Behind a flag, then delete the old one fast.</div>
+    </div>
+  </div>
+  <aside class="notes">
+    [24:00] If you take one thing: know your data. Every trick in this talk came from a property of the data, not from a generic hash map paper.
+    Still open: Cleanup holds the lock for the whole shard. That's next, with the same chunking pattern.
+  </aside>
+</section>
+
+<!-- ============================================================ 23. thanks -->
+<section class="center-all" data-hide-brand>
+  <canvas class="mapbg" data-intensity="0.8"></canvas>
+  <div class="over">
+    <div class="kicker enter" style="justify-content:center">Thank you</div>
+    <h1 class="enter d1" style="font-size:120px">Questions<span class="grad">?</span></h1>
+    <p class="enter d2 mono" style="font-size:28px; margin-top:30px">github.com/grafana/mimir · <span class="o">pkg/usagetracker/tenantshard</span></p>
+    <p class="enter d3 muted" style="font-size:24px">Oleg Zaytsev · github.com/colega</p>
+  </div>
+  <aside class="notes">[24:45] Thank you. The code is open source, in Mimir, pkg/usagetracker/tenantshard.</aside>
+</section>
+
+</div>
+</div>
+
+<script>if (location.search.includes("shot")) document.documentElement.classList.add("shot");</script>
+<script src="vendor/reveal/reveal.js"></script>
+<script src="vendor/notes/notes.js"></script>
+<script src="vendor/highlight/highlight.js"></script>
+<script src="anim.js"></script>
+<script src="bg.js"></script>
+<script>
+  DeckWire.prepare();
+  Reveal.initialize({
+    width: 1600,
+    height: 900,
+    margin: 0.02,
+    hash: true,
+    center: false,
+    controls: false,
+    controlsTutorial: false,
+    progress: true,
+    slideNumber: "c/t",
+    transition: "slide",
+    transitionSpeed: "default",
+    backgroundTransition: "fade",
+    plugins: [RevealNotes, RevealHighlight],
+  }).then(() => {
+    DeckWire.hook(Reveal);
+    DeckBg();
+    const brand = document.getElementById("brandmark");
+    const upd = () => brand.classList.toggle("hidden", Reveal.getCurrentSlide().hasAttribute("data-hide-brand"));
+    Reveal.on("slidechanged", upd);
+    upd();
+  });
+</script>
+</body>
+</html>

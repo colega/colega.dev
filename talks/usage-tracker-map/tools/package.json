@@ -1,0 +1,11 @@
+{
+  "name": "usage-tracker-map-tools",
+  "version": "1.0.0",
+  "description": "Screenshot and walk-through checks for the talk",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "puppeteer-core": "^23.11.1"
+  },
+  "private": true
+}

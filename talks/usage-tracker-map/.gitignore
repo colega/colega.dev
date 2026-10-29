@@ -1,0 +1,21 @@
+# Ignore everything in this talk by default, and allow only the files that make the talk.
+# Generated output (screenshots, browser profiles) goes to out/, and tools/node_modules is installed with npm.
+/*
+!/.gitignore
+!/README.md
+!/index.html
+!/theme.css
+!/anim.js
+!/bg.js
+!/vendor/
+!/bench/
+/bench/*
+!/bench/bench_test.go
+!/tools/
+/tools/*
+!/tools/shot.sh
+!/tools/shots.sh
+!/tools/walk.js
+!/tools/check.js
+!/tools/package.json
+!/tools/package-lock.json
