@@ -4,6 +4,8 @@
 (function () {
   const CELL = 14, GAP = 3, GROUP_GAP = 9;
   const maps = [];
+  // RGB triplets from theme.css, read once the stylesheet is loaded.
+  let rgb;
 
   function setup(canvas) {
     const W = 1600, H = 900;
@@ -62,16 +64,16 @@
         }
         let fill;
         if (flashA[i] < 0) {
-          fill = "rgba(242,73,92,0.55)";
+          fill = `rgba(${rgb.red},0.5)`;
           flashA[i] = Math.min(0, flashA[i] + dt * 2.5);
           if (flashA[i] === 0) flashA[i] = 0;
         } else if (age[i] < 0) {
-          fill = "rgba(255,255,255,0.025)";
+          fill = "rgba(16,24,40,0.035)";
         } else {
           const fresh = Math.max(0, 1 - age[i] / 20);
           const f = flashA[i];
-          const alpha = (0.1 + 0.35 * fresh + 0.5 * f) * m.intensity;
-          fill = f > 0.05 ? `rgba(251,202,10,${alpha})` : `rgba(255,136,51,${alpha})`;
+          const alpha = (0.1 + 0.32 * fresh + 0.45 * f) * m.intensity;
+          fill = f > 0.05 ? `rgba(${rgb.yellow},${alpha})` : `rgba(${rgb.orange},${alpha})`;
         }
         ctx.fillStyle = fill;
         ctx.fillRect(x, y, CELL, CELL);
@@ -79,8 +81,8 @@
     }
     // the sweep line
     const g = ctx.createLinearGradient(m.sweep - 120, 0, m.sweep + 4, 0);
-    g.addColorStop(0, "rgba(251,202,10,0)");
-    g.addColorStop(1, `rgba(251,202,10,${0.12 * m.intensity})`);
+    g.addColorStop(0, `rgba(${rgb.yellow},0)`);
+    g.addColorStop(1, `rgba(${rgb.yellow},${0.18 * m.intensity})`);
     ctx.fillStyle = g;
     ctx.fillRect(m.sweep - 120, 0, 124, H);
   }
@@ -97,6 +99,8 @@
   }
 
   window.DeckBg = function () {
+    const cs = getComputedStyle(document.documentElement);
+    rgb = { orange: cs.getPropertyValue("--orange-rgb").trim(), yellow: cs.getPropertyValue("--yellow-rgb").trim(), red: cs.getPropertyValue("--red-rgb").trim() };
     document.querySelectorAll("canvas.mapbg").forEach((c) => maps.push(setup(c)));
     requestAnimationFrame(loop);
   };

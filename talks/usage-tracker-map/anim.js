@@ -6,6 +6,20 @@
   const A = {};
   window.DeckAnims = A;
 
+  // The palette comes from the CSS variables in theme.css, so that the SVG diagrams use the same colors as
+  // the rest of the deck. It is read on first use, after the stylesheet has loaded.
+  let C;
+  function palette() {
+    const cs = getComputedStyle(document.documentElement);
+    const v = (n) => cs.getPropertyValue("--" + n).trim();
+    const names = ["bg", "panel", "panel2", "border", "line", "line2", "text", "strong", "muted", "faint", "orange", "orange-deep", "yellow", "yellow-fill", "blue", "green", "red", "purple", "teal"];
+    const p = {};
+    for (const n of names) p[n.replace(/-(.)/g, (_, c) => c.toUpperCase())] = v(n);
+    // tint("red", 0.2) is the red of the palette with an alpha.
+    p.tint = (name, a) => `rgba(${v(name + "-rgb")}, ${a})`;
+    return p;
+  }
+
   function h(tag, attrs, ...children) {
     const el = document.createElement(tag);
     for (const [k, v] of Object.entries(attrs || {})) {
@@ -63,16 +77,16 @@
       const box = (x, y, w, hh, title, sub, color, id) => {
         const g = s("g", { id: id || "" });
         g.append(
-          s("rect", { x, y, width: w, height: hh, rx: 18, fill: "#181b1f", stroke: color, "stroke-width": 2 }),
-          s("text", { x: x + w / 2, y: y + hh / 2 - (sub ? 6 : -10), "text-anchor": "middle", fill: "#fff", "font-size": 30, "font-weight": 700, text: title })
+          s("rect", { x, y, width: w, height: hh, rx: 18, fill: C.panel, stroke: color, "stroke-width": 2.5 }),
+          s("text", { x: x + w / 2, y: y + hh / 2 - (sub ? 6 : -10), "text-anchor": "middle", fill: C.strong, "font-size": 30, "font-weight": 700, text: title })
         );
-        if (sub) g.append(s("text", { x: x + w / 2, y: y + hh / 2 + 30, "text-anchor": "middle", fill: "#8e8e9e", "font-size": 20, class: "mono", text: sub }));
+        if (sub) g.append(s("text", { x: x + w / 2, y: y + hh / 2 + 30, "text-anchor": "middle", fill: C.muted, "font-size": 20, class: "mono", text: sub }));
         return g;
       };
       const defs = s("defs");
       defs.append(
         s("marker", { id: "arr", viewBox: "0 0 10 10", refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: "auto-start-reverse" },
-          s("path", { d: "M0,0 L10,5 L0,10 z", fill: "#5a5f6b" }))
+          s("path", { d: "M0,0 L10,5 L0,10 z", fill: C.line2 }))
       );
       svg.append(defs);
       const paths = {
@@ -84,27 +98,27 @@
         back: "M420,105 C330,60 330,60 250,105",
       };
       for (const [id, d] of Object.entries(paths)) {
-        svg.append(s("path", { id: "arch-" + id, d, stroke: "#3b3f47", "stroke-width": 3, fill: "none", "marker-end": "url(#arr)", class: "arch-path arch-" + id }));
+        svg.append(s("path", { id: "arch-" + id, d, stroke: C.line, "stroke-width": 3, fill: "none", "marker-end": "url(#arr)", class: "arch-path arch-" + id }));
       }
       svg.append(
-        box(20, 85, 230, 130, "Writers", "Prometheus, Alloy", "#5a5f6b"),
-        box(420, 85, 260, 130, "Distributor", "push path", "#6e9fff"),
-        box(850, 85, 260, 130, "Kafka", "ingest storage", "#5a5f6b"),
-        box(1200, 85, 200, 130, "Ingesters", "block-builders", "#5a5f6b")
+        box(20, 85, 230, 130, "Writers", "Prometheus, Alloy", C.line2),
+        box(420, 85, 260, 130, "Distributor", "push path", C.blue),
+        box(850, 85, 260, 130, "Kafka", "ingest storage", C.line2),
+        box(1200, 85, 200, 130, "Ingesters", "block-builders", C.line2)
       );
-      const ut = box(370, 385, 360, 140, "usage-tracker", "new series? over limit?", "#ff8833", "arch-ut");
+      const ut = box(370, 385, 360, 140, "usage-tracker", "new series? over limit?", C.orange, "arch-ut");
       ut.setAttribute("class", "arch-ut");
       svg.append(ut);
       svg.append(
-        s("text", { x: 470, y: 305, fill: "#fbca0a", "font-size": 20, class: "mono arch-lbl", "text-anchor": "end", text: "series hashes" }),
-        s("text", { x: 630, y: 305, fill: "#f2495c", "font-size": 20, class: "mono arch-lbl", text: "rejected hashes" }),
-        s("text", { x: 335, y: 52, fill: "#f2495c", "font-size": 22, class: "mono arch-lbl", "text-anchor": "middle", text: "429 Too Many Requests" })
+        s("text", { x: 470, y: 305, fill: C.blue, "font-size": 20, class: "mono arch-lbl", "text-anchor": "end", text: "series hashes" }),
+        s("text", { x: 630, y: 305, fill: C.red, "font-size": 20, class: "mono arch-lbl", text: "rejected hashes" }),
+        s("text", { x: 335, y: 52, fill: C.red, "font-size": 22, class: "mono arch-lbl", "text-anchor": "middle", text: "429 Too Many Requests" })
       );
       const warn = s("g", { class: "arch-warn" });
       warn.append(
-        s("text", { x: 1395, y: 268, fill: "#f2495c", "font-size": 22, "text-anchor": "end", class: "mono", text: "over the limit?" }),
-        s("text", { x: 1395, y: 298, fill: "#f2495c", "font-size": 22, "text-anchor": "end", class: "mono", text: "we find out here," }),
-        s("text", { x: 1395, y: 328, fill: "#f2495c", "font-size": 22, "text-anchor": "end", class: "mono", text: "after paying for Kafka" })
+        s("text", { x: 1395, y: 268, fill: C.red, "font-size": 22, "text-anchor": "end", class: "mono", text: "over the limit?" }),
+        s("text", { x: 1395, y: 298, fill: C.red, "font-size": 22, "text-anchor": "end", class: "mono", text: "we find out here," }),
+        s("text", { x: 1395, y: 328, fill: C.red, "font-size": 22, "text-anchor": "end", class: "mono", text: "after paying for Kafka" })
       );
       svg.append(warn);
       // flowing dots
@@ -130,9 +144,9 @@
       svg.append(dots);
       el.append(svg);
       const style = h("style", {}, `
-        .arch .flow-dot.bad { fill: #f2495c; filter: drop-shadow(0 0 6px rgba(242,73,92,.9)); }
-        .arch .flow-dot.ut { fill: #ff8833; }
-        .arch .flow-dot.rej { fill: #f2495c; }
+        .arch .flow-dot.bad { fill: var(--red); }
+        .arch .flow-dot.ut { fill: var(--orange); }
+        .arch .flow-dot.rej { fill: var(--red); }
         .arch .arch-ut, .arch .arch-lbl, .arch .arch-down, .arch .arch-up, .arch .arch-back, .arch .flow-dot.ut, .arch .arch-warn, .arch .flow-dot.bad { opacity: 0; transition: opacity .6s; }
         .arch.s1 .arch-warn, .arch.s1 .flow-dot.bad { opacity: 1; }
         .arch.s2 .arch-warn, .arch.s2 .flow-dot.leak { opacity: 0; }
@@ -151,28 +165,28 @@
   // ------------------------------------------------------------------ clock face
   A.clock = {
     init(el) {
-      const R = 250, C = 300;
+      const R = 250, CX = 300;
       const svg = s("svg", { viewBox: "0 0 600 600", width: "600", height: "600", class: "clock" });
       const ang = (m) => (m / 120) * 2 * Math.PI - Math.PI / 2;
-      const pt = (m, r) => [C + r * Math.cos(ang(m)), C + r * Math.sin(ang(m))];
-      svg.append(s("circle", { cx: C, cy: C, r: R + 30, fill: "#14161a", stroke: "#2c3235", "stroke-width": 2 }));
+      const pt = (m, r) => [CX + r * Math.cos(ang(m)), CX + r * Math.sin(ang(m))];
+      svg.append(s("circle", { cx: CX, cy: CX, r: R + 30, fill: C.panel, stroke: C.border, "stroke-width": 2 }));
       // valid window arc (filled sector), rotated by a group transform
-      const arcG = s("g", { class: "clk-arc", style: `transform-origin: ${C}px ${C}px` });
+      const arcG = s("g", { class: "clk-arc", style: `transform-origin: ${CX}px ${CX}px` });
       const sector = (from, to, r) => {
         const [x1, y1] = pt(from, r), [x2, y2] = pt(to, r);
         const large = to - from > 60 ? 1 : 0;
-        return `M${C},${C} L${x1},${y1} A${r},${r} 0 ${large} 1 ${x2},${y2} Z`;
+        return `M${CX},${CX} L${x1},${y1} A${r},${r} 0 ${large} 1 ${x2},${y2} Z`;
       };
-      arcG.append(s("path", { d: sector(-60, 0, R + 28), fill: "rgba(255,136,51,0.13)", stroke: "rgba(255,136,51,0.5)", "stroke-width": 1.5 }));
-      arcG.append(s("path", { d: sector(-20, 0, R + 28), fill: "rgba(251,202,10,0.10)" }));
+      arcG.append(s("path", { d: sector(-60, 0, R + 28), fill: C.tint("orange", 0.1), stroke: C.tint("orange", 0.55), "stroke-width": 1.5 }));
+      arcG.append(s("path", { d: sector(-20, 0, R + 28), fill: C.tint("yellow", 0.16) }));
       svg.append(arcG);
       for (let m = 0; m < 120; m++) {
         const big = m % 10 === 0;
         const [x1, y1] = pt(m, R + 28), [x2, y2] = pt(m, R + (big ? 10 : 20));
-        svg.append(s("line", { x1, y1, x2, y2, stroke: big ? "#8e8e9e" : "#3b3f47", "stroke-width": big ? 3 : 1.5 }));
+        svg.append(s("line", { x1, y1, x2, y2, stroke: big ? C.muted : C.line, "stroke-width": big ? 3 : 1.5 }));
         if (big) {
           const [tx, ty] = pt(m, R - 14);
-          svg.append(s("text", { x: tx, y: ty + 8, "text-anchor": "middle", fill: m === 0 ? "#fbca0a" : "#8e8e9e", "font-size": 22, class: "mono", text: String(m) }));
+          svg.append(s("text", { x: tx, y: ty + 8, "text-anchor": "middle", fill: m === 0 ? C.orangeDeep : C.muted, "font-size": 22, "font-weight": m === 0 ? 800 : 500, class: "mono", text: String(m) }));
         }
       }
       // series dots
@@ -195,23 +209,23 @@
       addDots(30, 111, 130, "b");
       // hands
       const hand = (cls, color, len, w) => {
-        const g = s("g", { class: cls, style: `transform-origin:${C}px ${C}px` });
-        g.append(s("line", { x1: C, y1: C, x2: C, y2: C - len, stroke: color, "stroke-width": w, "stroke-linecap": "round" }));
-        g.append(s("circle", { cx: C, cy: C - len, r: w + 3, fill: color }));
+        const g = s("g", { class: cls, style: `transform-origin:${CX}px ${CX}px` });
+        g.append(s("line", { x1: CX, y1: CX, x2: CX, y2: CX - len, stroke: color, "stroke-width": w, "stroke-linecap": "round" }));
+        g.append(s("circle", { cx: CX, cy: CX - len, r: w + 3, fill: color }));
         return g;
       };
-      const wm = hand("clk-wm", "#f2495c", R - 40, 4);
-      const now = hand("clk-now", "#fbca0a", R + 10, 6);
-      svg.append(wm, now, s("circle", { cx: C, cy: C, r: 12, fill: "#fbca0a" }));
-      const big = s("text", { x: C, y: C + 70, "text-anchor": "middle", fill: "#fff", "font-size": 40, "font-weight": 800, class: "mono clk-now-label", text: "" });
+      const wm = hand("clk-wm", C.red, R - 40, 4);
+      const now = hand("clk-now", C.yellowFill, R + 10, 6);
+      svg.append(wm, now, s("circle", { cx: CX, cy: CX, r: 12, fill: C.yellowFill }));
+      const big = s("text", { x: CX, y: CX + 70, "text-anchor": "middle", fill: C.strong, "font-size": 40, "font-weight": 800, class: "mono clk-now-label", text: "" });
       svg.append(big);
       el.append(svg);
       el._clk = { arcG, now, wm, dots, big };
       el.append(h("style", {}, `
         .clock .clk-arc, .clock .clk-now, .clock .clk-wm { transition: transform 1.6s cubic-bezier(.45,0,.2,1), opacity .5s; }
-        .clock .clk-dot { fill: #6e9fff; opacity: 0; transform: scale(0); transition: transform .5s cubic-bezier(.3,1.6,.5,1), opacity .5s, fill .5s; }
+        .clock .clk-dot { fill: var(--blue); opacity: 0; transform: scale(0); transition: transform .5s cubic-bezier(.3,1.6,.5,1), opacity .5s, fill .5s; }
         .clock .clk-dot.on { opacity: .9; transform: scale(1); }
-        .clock .clk-dot.exp { fill: #f2495c; }
+        .clock .clk-dot.exp { fill: var(--red); }
         .clock .clk-dot.gone { opacity: 0; transform: scale(2.5); }
       `));
     },
@@ -272,12 +286,12 @@
         .grp-row .cell { font-size: 16px; }
         .grp-comp { display:flex; height: 46px; margin: 34px 0 0 150px; border-radius: 10px; overflow:hidden; width: 1280px; opacity:0; transition: opacity .6s; }
         .grp-comp.on { opacity: 1; }
-        .grp-comp > div { display:flex; align-items:center; justify-content:center; font-family: var(--mono); font-size: 18px; color:#111; font-weight:700; }
+        .grp-comp > div { display:flex; align-items:center; justify-content:center; font-family: var(--mono); font-size: 18px; color:#fff; font-weight:700; }
       `));
       const comp = h("div", { class: "grp-comp" },
-        h("div", { style: "width:10%; background:#ff8833" }, "8"),
-        h("div", { style: "width:10%; background:#fbca0a" }, "8"),
-        h("div", { style: "width:80%; background:#6e9fff" }, "64 bytes of keys: one whole cache line")
+        h("div", { style: "width:10%; background:var(--orange)" }, "8"),
+        h("div", { style: "width:10%; background:var(--yellow-fill); color: var(--strong)" }, "8"),
+        h("div", { style: "width:80%; background:var(--blue)" }, "64 bytes of keys: one whole cache line")
       );
       el.append(comp);
       el._g.comp = comp;
@@ -319,7 +333,7 @@
       });
       const slots = h("div", { class: "cells", style: "margin: 4px 0 0 0" });
       slots.append(h("div", { class: "rowlabel", style: "width:250px" }, "slot"));
-      for (let i = 0; i < 8; i++) slots.append(h("div", { class: "mono", style: "width:84px; text-align:center; color:#8e8e9e; font-size:18px" }, String(i)));
+      for (let i = 0; i < 8; i++) slots.append(h("div", { class: "mono", style: "width:84px; text-align:center; color:var(--muted); font-size:18px" }, String(i)));
       el.prepend(slots);
       el.append(h("style", {}, `.m-row { opacity:0; transform: translateY(14px); transition: all .5s cubic-bezier(.2,.8,.2,1); } .m-row.on { opacity:1; transform:none; }`));
     },
@@ -349,7 +363,7 @@
         cells.push(c);
         row.append(c);
       }
-      const idxs = h("div", { class: "mono", style: "display:flex; justify-content:space-between; width: 1290px; color:#8e8e9e; font-size:18px; margin-top: 8px" }, h("span", {}, "bit 63"), h("span", {}, "bit 0"));
+      const idxs = h("div", { class: "mono", style: "display:flex; justify-content:space-between; width: 1290px; color:var(--muted); font-size:18px; margin-top: 8px" }, h("span", {}, "bit 63"), h("span", {}, "bit 0"));
       el.append(row, idxs);
       el._b = { cells, bits, shard, val };
     },
@@ -383,7 +397,7 @@
       const wrap = h("div", { style: "display:flex; gap: 36px" });
       for (let g = 0; g < 3; g++) {
         const col = h("div", {});
-        col.append(h("div", { class: "mono", style: "color:#8e8e9e; font-size:20px; margin: 0 0 10px 2px" }, "group " + g + (g === 0 ? "  (probe start of X)" : "")));
+        col.append(h("div", { class: "mono", style: "color:var(--muted); font-size:20px; margin: 0 0 10px 2px" }, "group " + g + (g === 0 ? "  (probe start of X)" : "")));
         const r = h("div", { class: "cells", style: "gap:5px" });
         const cs = [];
         for (let i = 0; i < 8; i++) {
@@ -522,7 +536,7 @@
         for (let i = 1; i < 8; i++) {
           setCell(I[i], i === 7 ? "01" : "00", i === 7 ? "spill" : "");
           setCell(D[i], i === 7 ? "01" : "00", i === 7 ? "spill" : "");
-          setCell(K[i], "k" + i, "occ dim clean");
+          setCell(K[i], "k" + i, "clean");
         }
         flash(I[7], "write");
         flash(D[7], "write");
@@ -552,7 +566,7 @@
       const b1 = mkBlock(true), b2 = mkBlock(false);
       const line = (vals, label) => {
         const wrap = h("div", { class: "cl-line", style: "margin: 12px 0" });
-        wrap.append(h("div", { class: "mono", style: "font-size:19px; color:#8e8e9e; margin-bottom:8px" }, label));
+        wrap.append(h("div", { class: "mono", style: "font-size:19px; color:var(--muted); margin-bottom:8px" }, label));
         const r = h("div", { class: "cells group-gap", style: "gap:2px" });
         const cs = vals.map((v) => {
           const c = cell("", v == null ? "" : "occ", 17);
@@ -626,35 +640,35 @@
       const X0 = 210, X1 = 1380, T = 300; // ms on the axis
       const x = (ms) => X0 + ((X1 - X0) * ms) / T;
       const lane = (y, label, sub) => {
-        svg.append(s("text", { x: 0, y: y + 8, fill: "#fff", "font-size": 26, "font-weight": 700, text: label }));
-        svg.append(s("text", { x: 0, y: y + 40, fill: "#8e8e9e", "font-size": 18, class: "mono", text: sub }));
-        svg.append(s("line", { x1: X0, y1: y + 55, x2: X1, y2: y + 55, stroke: "#2c3235", "stroke-width": 2 }));
+        svg.append(s("text", { x: 0, y: y + 8, fill: C.strong, "font-size": 26, "font-weight": 700, text: label }));
+        svg.append(s("text", { x: 0, y: y + 40, fill: C.muted, "font-size": 18, class: "mono", text: sub }));
+        svg.append(s("line", { x1: X0, y1: y + 55, x2: X1, y2: y + 55, stroke: C.border, "stroke-width": 2 }));
       };
       lane(40, "before", "Items(): clone");
       lane(260, "after", "Iterate(): chunks");
       for (let ms = 0; ms <= T; ms += 50) {
-        svg.append(s("text", { x: x(ms), y: 460, fill: "#6c6f80", "font-size": 17, "text-anchor": "middle", class: "mono", text: ms + " ms" }));
+        svg.append(s("text", { x: x(ms), y: 460, fill: C.faint, "font-size": 17, "text-anchor": "middle", class: "mono", text: ms + " ms" }));
       }
       const before = s("g", { class: "lk-before" });
-      before.append(s("rect", { x: x(0), y: 20, width: x(230) - x(0), height: 50, rx: 8, fill: "rgba(242,73,92,.85)", class: "lk-hold" }));
-      before.append(s("text", { x: x(115), y: 53, fill: "#fff", "font-size": 22, "text-anchor": "middle", "font-weight": 700, text: "shard lock: one hold, up to 230 ms", class: "lk-holdtxt" }));
+      before.append(s("rect", { x: x(0), y: 20, width: x(230) - x(0), height: 50, rx: 8, fill: C.red, class: "lk-hold" }));
+      before.append(s("text", { x: x(115), y: 53, fill: "#ffffff", "font-size": 22, "text-anchor": "middle", "font-weight": 700, text: "shard lock: one hold, up to 230 ms", class: "lk-holdtxt" }));
       for (let i = 0; i < 14; i++) {
         const t = 8 + i * 16;
         const y = 82 + (i % 4) * 14;
-        before.append(s("line", { x1: x(t), y1: y, x2: x(230), y2: y, stroke: "#ff8833", "stroke-width": 5, "stroke-linecap": "round", class: "lk-wait", style: `transition-delay:${(0.6 + i * 0.05).toFixed(2)}s` }));
+        before.append(s("line", { x1: x(t), y1: y, x2: x(230), y2: y, stroke: C.orange, "stroke-width": 5, "stroke-linecap": "round", class: "lk-wait", style: `transition-delay:${(0.6 + i * 0.05).toFixed(2)}s` }));
       }
-      before.append(s("text", { x: x(232), y: 140, fill: "#ff8833", "font-size": 20, class: "mono lk-wait", text: "trackSeries calls wait" }));
+      before.append(s("text", { x: x(232), y: 140, fill: C.orangeDeep, "font-size": 20, class: "mono lk-wait", text: "trackSeries calls wait" }));
       const after = s("g", { class: "lk-after" });
       for (let i = 0; i < 60; i++) {
         const t = i * 5;
-        after.append(s("rect", { x: x(t), y: 240, width: 3, height: 50, fill: "rgba(115,191,105,.9)", class: "lk-chunk", style: `transition-delay:${(i * 0.02).toFixed(2)}s` }));
+        after.append(s("rect", { x: x(t), y: 240, width: 3, height: 50, fill: C.green, class: "lk-chunk", style: `transition-delay:${(i * 0.02).toFixed(2)}s` }));
       }
       for (let i = 0; i < 14; i++) {
         const t = 8 + i * 16;
         const y = 302 + (i % 4) * 14;
-        after.append(s("circle", { cx: x(t), cy: y, r: 5, fill: "#6e9fff", class: "lk-req", style: `transition-delay:${(0.8 + i * 0.05).toFixed(2)}s` }));
+        after.append(s("circle", { cx: x(t), cy: y, r: 5, fill: C.blue, class: "lk-req", style: `transition-delay:${(0.8 + i * 0.05).toFixed(2)}s` }));
       }
-      after.append(s("text", { x: x(150), y: 400, fill: "#73bf69", "font-size": 22, "text-anchor": "middle", class: "mono lk-req", text: "~460 holds per shard: 24 µs average, 110 µs max" }));
+      after.append(s("text", { x: x(150), y: 400, fill: C.green, "font-size": 22, "text-anchor": "middle", class: "mono lk-req", text: "~460 holds per shard: 24 µs average, 110 µs max" }));
       svg.append(before, after);
       el.append(svg);
       el.append(h("style", {}, `
@@ -688,14 +702,14 @@
       svg.append(s("line", { x1: 20, y1: Y, x2: 1420, y2: Y, stroke: "url(#tlg)", "stroke-width": 5, "stroke-linecap": "round", class: "tl-axis", "stroke-dasharray": 1400, "stroke-dashoffset": 1400 }));
       const defs = s("defs");
       const lg = s("linearGradient", { id: "tlg", x1: 0, x2: 1, y1: 0, y2: 0 });
-      lg.append(s("stop", { offset: "0", "stop-color": "#f05a28" }), s("stop", { offset: "1", "stop-color": "#fbca0a" }));
+      lg.append(s("stop", { offset: "0", "stop-color": C.orangeDeep }), s("stop", { offset: "1", "stop-color": C.yellowFill }));
       defs.append(lg);
       svg.append(defs);
       ev.forEach((e, i) => {
         if (i > 0 && e.d.slice(0, 4) !== ev[i - 1].d.slice(0, 4)) {
           const yx = xi(i) - step / 2;
-                    svg.append(s("rect", { x: yx - 34, y: Y - 15, width: 68, height: 30, rx: 8, fill: "#0b0c0e", stroke: "#5a5f6b" }));
-          svg.append(s("text", { x: yx, y: Y + 7, fill: "#ccccdc", "font-size": 19, "text-anchor": "middle", class: "mono", text: e.d.slice(0, 4) }));
+                    svg.append(s("rect", { x: yx - 34, y: Y - 15, width: 68, height: 30, rx: 8, fill: C.bg, stroke: C.line2 }));
+          svg.append(s("text", { x: yx, y: Y + 7, fill: C.text, "font-size": 19, "text-anchor": "middle", class: "mono", text: e.d.slice(0, 4) }));
         }
       });
       const lanes = [-1, 1, -2, 2];
@@ -706,12 +720,12 @@
         const ly = up ? Y - 70 - (lane - 1) * 110 : Y + 80 + (lane - 1) * 110;
         const x = xi(i);
         const g = s("g", { class: "tl-ev", style: `animation-delay:${(0.4 + i * 0.12).toFixed(2)}s` });
-        const color = e.c || "#ff8833";
+        const color = C[e.c] || e.c || C.orange;
         g.append(s("line", { x1: x, y1: Y, x2: x, y2: up ? ly + 36 : ly - 26, stroke: color, "stroke-width": 1.5, opacity: 0.6 }));
         g.append(s("circle", { cx: x, cy: Y, r: 9, fill: color }));
-        g.append(s("text", { x, y: up ? ly - 22 : ly, fill: "#fff", "font-size": 21, "font-weight": 650, "text-anchor": "middle", text: e.t }));
+        g.append(s("text", { x, y: up ? ly - 22 : ly, fill: C.strong, "font-size": 21, "font-weight": 650, "text-anchor": "middle", text: e.t }));
         g.append(s("text", { x, y: up ? ly + 4 : ly + 26, fill: color, "font-size": 17, "text-anchor": "middle", class: "mono", text: e.s }));
-        g.append(s("text", { x, y: up ? ly + 26 : ly + 48, fill: "#6c6f80", "font-size": 15, "text-anchor": "middle", class: "mono", text: e.d.slice(0, 7) }));
+        g.append(s("text", { x, y: up ? ly + 26 : ly + 48, fill: C.faint, "font-size": 15, "text-anchor": "middle", class: "mono", text: e.d.slice(0, 7) }));
         svg.append(g);
       });
       el.append(svg);
@@ -793,6 +807,7 @@
       const a = A[el.dataset.anim];
       if (!a) return;
       if (!el._inited) {
+        C = C || palette();
         a.init(el);
         el._inited = true;
       }

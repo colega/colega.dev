@@ -20,9 +20,9 @@
   <div class="over">
     <div class="kicker enter">FOSDEM 2027 · Go devroom</div>
     <h1 class="enter d1" style="font-size:132px">The Map<br><span class="grad">That Forgets</span></h1>
-    <p class="enter d2" style="font-size:38px; max-width:1150px; color:#ddd">A custom hash map in Go that tracks a billion series and forgets each one after 20 idle minutes</p>
+    <p class="enter d2" style="font-size:38px; max-width:1150px; color:var(--text)">A custom hash map in Go that tracks a billion series and forgets each one after 20 idle minutes</p>
     <div class="enter d3" style="margin-top:50px; display:flex; gap:22px; align-items:center">
-      <span style="font-size:32px; font-weight:700; color:#fff">Oleg Zaytsev</span>
+      <span style="font-size:32px; font-weight:700; color:var(--strong)">Oleg Zaytsev</span>
       <span class="pill o">Grafana Labs · Mimir</span>
       <span class="pill">github.com/colega</span>
     </div>
@@ -656,16 +656,16 @@ func pooledClone[T any](input []T, pool *sync.Pool) *[]T {
   <div data-anim="timeline" data-steps="0" data-events='[
     {"d":"2024-12-07","t":"Swiss map + channels","s":"#10164","lane":-3,"a":"start"},
     {"d":"2024-12-09","t":"mutexes","s":"#10193","lane":-1,"a":"start"},
-    {"d":"2025-07-07","t":"16 shards, keys array","s":"usage-tracker branch","lane":1,"c":"#6e9fff"},
-    {"d":"2025-08-22","t":"in main","s":"#12358","lane":-2,"c":"#6e9fff"},
+    {"d":"2025-07-07","t":"16 shards, keys array","s":"usage-tracker branch","lane":1,"c":"blue"},
+    {"d":"2025-08-22","t":"in main","s":"#12358","lane":-2,"c":"blue"},
     {"d":"2025-11-04","t":"Load: no lookup","s":"#13284","lane":2},
     {"d":"2026-03-12","t":"limit-aware growth","s":"#14642","lane":-1},
-    {"d":"2026-04-10","t":"move, not tombstone","s":"#14932","lane":1,"c":"#b877d9"},
+    {"d":"2026-04-10","t":"move, not tombstone","s":"#14932","lane":1,"c":"purple"},
     {"d":"2026-06-29","t":"throttle cleanup","s":"#15871","lane":-3},
-    {"d":"2026-09-14","t":"spillmarks","s":"#16532","lane":2,"c":"#4fd1c5","a":"end"},
+    {"d":"2026-09-14","t":"spillmarks","s":"#16532","lane":2,"c":"teal","a":"end"},
     {"d":"2026-10-05","t":"branchless clock","s":"#16778","lane":-2,"a":"end"},
-    {"d":"2026-10-13","t":"SWAR cleanup","s":"#16825","lane":1,"c":"#73bf69","a":"end"},
-    {"d":"2026-10-16","t":"chunked snapshots","s":"#16882 #16892","lane":-1,"c":"#73bf69","a":"end"}
+    {"d":"2026-10-13","t":"SWAR cleanup","s":"#16825","lane":1,"c":"green","a":"end"},
+    {"d":"2026-10-16","t":"chunked snapshots","s":"#16882 #16892","lane":-1,"c":"green","a":"end"}
   ]'></div>
   <aside class="notes">
     [23:30] The whole story in one picture. A hackathon in December 2024. Production in summer 2025. And most of the deep work happened in the last few months, once real tenants grew big enough to show us where it hurts.

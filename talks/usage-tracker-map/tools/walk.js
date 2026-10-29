@@ -24,6 +24,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   page.on("console", (m) => {
     if (m.type() === "error" || m.type() === "warn") errors.push(m.type() + ": " + m.text());
   });
+  await page.setCacheEnabled(false); // always test the files on disk
   await page.goto("http://127.0.0.1:8765/index.html", { waitUntil: "networkidle0" });
   await sleep(1500);
 

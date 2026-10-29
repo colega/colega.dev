@@ -23,7 +23,7 @@ Opening `index.html` from the file system also works.
 - `index.html`: slides and speaker notes.
 - `anim.js`: the step-driven diagrams (architecture, clock face, group layout, SWAR match, bit packing, probe chain, three generations of delete, SWAR cleanup, lock holds, timeline).
 - `bg.js`: the background on title and section slides: a map that fills, ages, and gets cleaned up by a sweep.
-- `theme.css`: Grafana-style dark theme.
+- `theme.css`: Grafana-style light theme (dark text on white, for projectors in half-lit rooms). All colors are CSS variables here; `anim.js` and `bg.js` read them too.
 - `tools/shot.sh`, `tools/shots.sh`: headless Chrome screenshots to `out/shots/`, for example `tools/shots.sh s05=/5/0/3` (slide 5, fragment 3).
 - `tools/walk.js`: clicks through all 83 steps in real Chrome with animations on. It saves a screenshot per step to `out/live/` and reports JS errors, failed requests, and elements outside the slide. `tools/check.js` checks the speaker notes. Run `npm install` in `tools/` once, then `node tools/walk.js` while the server runs.
 - `bench/bench_test.go`: the Go map comparison on slide 13. It imports Mimir packages, so copy it into a directory of the Mimir repo to run it.

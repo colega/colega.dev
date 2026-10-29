@@ -4,6 +4,7 @@ const path = require("path");
 (async () => {
   const b = await puppeteer.launch({ executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", headless: "new", userDataDir: path.join(__dirname, "..", "out", "chrome-profile") });
   const p = await b.newPage();
+  await p.setCacheEnabled(false);
   await p.goto("http://127.0.0.1:8765/index.html", { waitUntil: "networkidle0" });
   const r = await p.evaluate(() => {
     const slides = [...document.querySelectorAll(".reveal .slides > section")];
