@@ -361,14 +361,24 @@ html, body {
   align-items: center;
   gap: 10px;
 }
-.brandmark i {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--grad);
-  display: inline-block;
+.brandmark img {
+  height: 30px;
+  width: auto;
 }
+.brandmark span { transition: opacity 0.4s; }
+.brandmark.no-text span { opacity: 0; }
+.brandmark { transition: opacity 0.4s; }
 .brandmark.hidden { opacity: 0; }
+
+/* The Grafana Labs logo on the title slide, top left like the Grafana presentation template. */
+.reveal section .logo-labs {
+  position: absolute;
+  top: 64px;
+  left: 90px;
+  height: 46px;
+  width: auto;
+  z-index: 1;
+}
 
 /* ---------- section slides ---------- */
 .reveal section.section-slide {

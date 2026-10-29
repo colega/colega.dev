@@ -10,13 +10,14 @@
 <link rel="stylesheet" href="theme.css">
 </head>
 <body>
-<div class="brandmark" id="brandmark"><i></i>FOSDEM 2027 · Go devroom · The Map That Forgets</div>
+<div class="brandmark" id="brandmark"><img src="vendor/brand/grafana-icon.svg" alt="Grafana"><span>The Map That Forgets</span></div>
 <div class="reveal">
 <div class="slides">
 
 <!-- ============================================================ 1. title -->
-<section class="v-center" data-hide-brand>
+<section class="v-center" data-hide-brand data-hide-logo>
   <canvas class="mapbg" data-intensity="1"></canvas>
+  <img class="logo-labs enter" src="vendor/brand/grafana-labs-logo.svg" alt="Grafana Labs">
   <div class="over">
     <div class="kicker enter">FOSDEM 2027 · Go devroom</div>
     <h1 class="enter d1" style="font-size:132px">The Map<br><span class="grad">That Forgets</span></h1>
@@ -736,7 +737,12 @@ func pooledClone[T any](input []T, pool *sync.Pool) *[]T {
     DeckWire.hook(Reveal);
     DeckBg();
     const brand = document.getElementById("brandmark");
-    const upd = () => brand.classList.toggle("hidden", Reveal.getCurrentSlide().hasAttribute("data-hide-brand"));
+    // data-hide-brand hides the text next to the corner logo, data-hide-logo (the title slide, which has the big logo) hides both.
+    const upd = () => {
+      const s = Reveal.getCurrentSlide();
+      brand.classList.toggle("no-text", s.hasAttribute("data-hide-brand"));
+      brand.classList.toggle("hidden", s.hasAttribute("data-hide-logo"));
+    };
     Reveal.on("slidechanged", upd);
     upd();
   });
